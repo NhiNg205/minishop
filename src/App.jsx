@@ -18,8 +18,11 @@ function App() {
   const [loadingNotify, setLoadingNotify] = useState(true); 
   const [customerName, setCustomerName] = useState(''); 
 
-  // MỚI: Trạng thái bật/tắt popup thông báo nhỏ tại Chuông
+  // Trạng thái bật/tắt popup thông báo nhỏ tại Chuông
   const [isNotifyDropdownOpen, setIsNotifyDropdownOpen] = useState(false);
+
+  // Hệ thống thông báo tự chế thay thế cho alert() mặc định
+  const [customAlert, setCustomAlert] = useState({ isOpen: false, type: 'info', message: '' });
 
   // Trạng thái Đăng ký - Đăng nhập
   const [isAuthOpen, setIsAuthOpen] = useState(false); 
@@ -29,7 +32,6 @@ function App() {
   const [activeNotifyTab, setActiveNotifyTab] = useState('all');
 
   const dropdownRef = useRef(null);
-  // MỚI: Ref dùng để bắt sự kiện click ra ngoài để đóng hộp thông báo chuông
   const notifyDropdownRef = useRef(null);
 
   // Tự động đổi tên trên Tab trình duyệt thành MiniShop khi ứng dụng chạy
@@ -61,7 +63,6 @@ function App() {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
         setIsMenuOpen(false);
       }
-      // Đóng popup thông báo nhỏ nếu click ra ngoài khu vực chuông
       if (notifyDropdownRef.current && !notifyDropdownRef.current.contains(event.target)) {
         setIsNotifyDropdownOpen(false);
       }
@@ -134,8 +135,12 @@ function App() {
   };
 
   const handleCheckout = async () => {
-    if (cart.length === 0) return alert("Hãy thêm sản phẩm vào giỏ trước khi đặt hàng!");
-    if (!customerName.trim()) return alert("Vui lòng nhập tên của bạn trước khi xác nhận đặt hàng!");
+    if (cart.length === 0) {
+      return setCustomAlert({ isOpen: true, type: 'warning', message: 'Hãy thêm sản phẩm vào giỏ trước khi đặt hàng!' });
+    }
+    if (!customerName.trim()) {
+      return setCustomAlert({ isOpen: true, type: 'warning', message: 'Vui lòng nhập tên của bạn trước khi xác nhận đặt hàng!' });
+    }
 
     const orderData = {
       customer_name: customerName,
@@ -155,17 +160,38 @@ function App() {
       const result = await response.json();
 
       if (response.ok && result.status === "success") {
-        alert(`🎉 Đặt hàng thành công!\nMã đơn hàng bảo mật là: ${result.order.order_code}`);
+        setCustomAlert({ 
+          isOpen: true, 
+          type: 'success', 
+          message: `🎉 Đặt hàng thành công!\nMã đơn hàng bảo mật của bạn là: ${result.order.order_code}`
+        });
         setCart([]);
         setCustomerName('');
         setIsCartOpen(false);
       } else {
-        alert(`Lỗi hệ thống: ${result.message}`);
+        setCustomAlert({ 
+          isOpen: true, 
+          type: 'error', 
+          message: result.message || 'Lỗi hệ thống: Không thể xử lý đơn hàng.' 
+        });
       }
     } catch (error) {
       console.error("Lỗi kết nối đặt hàng:", error);
-      alert("Không thể kết nối tới máy chủ Backend!");
+      setCustomAlert({ isOpen: true, type: 'error', message: 'Không thể kết nối tới máy chủ Backend!' });
     }
+  };
+
+  // Hàm xử lý khi nhấn nút Đăng nhập / Đăng ký
+  const handleAuthSubmit = (e) => {
+    e.preventDefault();
+    setIsAuthOpen(false); // Đóng khung form lại
+    
+    // Đã sửa: Hiện modal custom thay thế hoàn toàn cho popup đen trình duyệt
+    setCustomAlert({ 
+      isOpen: true, 
+      type: 'info', 
+      message: 'Tính năng xác thực tài khoản và dữ liệu thành viên sẽ được xử lý tiếp ở hệ thống Backend!' 
+    });
   };
 
   const totalCartPrice = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
@@ -185,7 +211,6 @@ function App() {
     return n.type === activeNotifyTab;
   });
 
-  // MỚI: Lấy ra danh sách tối đa 3 thông báo mới nhất phục vụ cho việc hiển thị nhanh ở Chuông
   const quickNotifications = notifications.slice(0, 3);
 
   return (
@@ -195,7 +220,6 @@ function App() {
       <header className="bg-blue-600 text-white shadow-sm">
         <div className="px-8 py-4 flex justify-between items-center max-w-7xl mx-auto w-full">
           
-          {/* Logo chữ hiển thị giao diện thành MiniShop */}
           <div onClick={() => { setActivePage('home'); setSelectedCategory('Tất Cả Đồ Dùng'); setSearchQuery(''); }} className="flex items-center gap-3 cursor-pointer">
             <span className="bg-white p-2.5 rounded-xl text-2xl text-blue-600 shadow-sm">🛍️</span>
             <div>
@@ -218,10 +242,9 @@ function App() {
             />
           </div>
 
-          {/* Nút Chuông thông báo & Giỏ hàng */}
+          {/* Góc tiện ích bên phải */}
           <div className="flex items-center gap-6">
             
-            {/* SỬA ĐỔI: Bọc Chuông trong div tương đối để ghim Popup thông báo nhỏ */}
             <div className="relative" ref={notifyDropdownRef}>
               <button 
                 onClick={() => setIsNotifyDropdownOpen(!isNotifyDropdownOpen)}
@@ -234,7 +257,7 @@ function App() {
                 </span>
               </button>
 
-              {/* MỚI: POPUP POPUP THÔNG BÁO NHỎ KHI NHẤN VÀO CHUÔNG */}
+              {/* POPUP THÔNG BÁO NHỎ */}
               {isNotifyDropdownOpen && (
                 <div className="absolute right-0 top-full mt-2 w-80 bg-white border border-gray-200 rounded-2xl shadow-xl z-50 text-gray-900 overflow-hidden animate-fadeIn">
                   <div className="px-4 py-3 bg-gray-50 border-b border-gray-150 flex justify-between items-center">
@@ -267,11 +290,10 @@ function App() {
                     )}
                   </div>
 
-                  {/* Nút Xem chi tiết chuyển hướng sang mục thông báo lớn */}
                   <button 
                     onClick={() => {
                       setActivePage('notifications');
-                      setIsNotifyDropdownOpen(false); // Đóng hộp thoại nhỏ lại
+                      setIsNotifyDropdownOpen(false);
                     }}
                     className="w-full text-center py-2.5 bg-gray-50 hover:bg-gray-100 text-blue-600 hover:text-blue-700 font-black text-xs border-t border-gray-150 uppercase tracking-wider block transition-all"
                   >
@@ -294,7 +316,7 @@ function App() {
         </div>
       </header>
 
-      {/* THANH MENU NGANG CHÍNH */}
+      {/* THANH NAV NGANG */}
       <nav className="bg-white border-b border-gray-200 text-xs font-bold text-gray-700 tracking-wide sticky top-0 z-30 shadow-sm">
         <div className="max-w-7xl mx-auto px-8 flex items-center justify-between h-12">
           
@@ -350,9 +372,8 @@ function App() {
         </div>
       </nav>
 
-      {/* ĐIỀU HƯỚNG GIAO DIỆN */}
+      {/* NỘI DUNG CHÍNH */}
       {activePage === 'home' ? (
-        /* ==================== TRANG CHỦ BAN ĐẦU ==================== */
         <main className="max-w-7xl mx-auto px-8 py-6">
           {/* BANNER */}
           <div className="w-full border border-blue-100 rounded-3xl p-10 flex justify-between items-center relative overflow-hidden min-h-[300px] mb-6 shadow-sm bg-blue-50/70 text-gray-900">
@@ -373,7 +394,7 @@ function App() {
             </div>
           </div>
 
-          {/* CÁC TAB PHÍM TẮT NHANH */}
+          {/* TAB PHÍM TẮT NHANH */}
           <div className="flex gap-3 mb-8 overflow-x-auto pb-2">
             {quickTabs.map((tab, idx) => (
               <button
@@ -387,7 +408,7 @@ function App() {
             ))}
           </div>
 
-          {/* GRID HIỂN THỊ SẢN PHẨM */}
+          {/* GRID SẢN PHẨM */}
           <section>
             <div className="mb-6 border-b border-gray-200 pb-2">
               <h3 className="text-base font-black text-gray-800 tracking-tight uppercase">
@@ -457,9 +478,8 @@ function App() {
           </section>
         </main>
       ) : (
-        /* ==================== MỤC THÔNG BÁO CHÍNH THỨC TOÀN MÀN HÌNH ==================== */
+        /* TRANG THÔNG BÁO CHÍNH THỨC */
         <main className="max-w-4xl mx-auto px-6 py-10 animate-fadeIn">
-          
           <div className="flex justify-between items-center mb-8">
             <div>
               <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Cập nhật thời gian thực</div>
@@ -475,40 +495,27 @@ function App() {
             </button>
           </div>
 
-          {/* THANH TAB PHÂN LOẠI */}
           <div className="flex bg-gray-200/70 p-1 rounded-2xl mb-6 gap-1 border border-gray-200">
-            <button 
-              onClick={() => setActiveNotifyTab('all')}
-              className={`flex-1 py-3 text-xs font-black rounded-xl uppercase transition-all cursor-pointer ${activeNotifyTab === 'all' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
-            >
+            <button onClick={() => setActiveNotifyTab('all')} className={`flex-1 py-3 text-xs font-black rounded-xl uppercase transition-all cursor-pointer ${activeNotifyTab === 'all' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}>
               Tất cả ({notifications.length})
             </button>
-            <button 
-              onClick={() => setActiveNotifyTab('sale')}
-              className={`flex-1 py-3 text-xs font-black rounded-xl uppercase transition-all cursor-pointer ${activeNotifyTab === 'sale' ? 'bg-white text-red-500 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
-            >
+            <button onClick={() => setActiveNotifyTab('sale')} className={`flex-1 py-3 text-xs font-black rounded-xl uppercase transition-all cursor-pointer ${activeNotifyTab === 'sale' ? 'bg-white text-red-500 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}>
               🔥 Sản phẩm Sale
             </button>
-            <button 
-              onClick={() => setActiveNotifyTab('new')}
-              className={`flex-1 py-3 text-xs font-black rounded-xl uppercase transition-all cursor-pointer ${activeNotifyTab === 'new' ? 'bg-white text-green-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
-            >
+            <button onClick={() => setActiveNotifyTab('new')} className={`flex-1 py-3 text-xs font-black rounded-xl uppercase transition-all cursor-pointer ${activeNotifyTab === 'new' ? 'bg-white text-green-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}>
               ✨ Sản phẩm mới
             </button>
-            <button 
-              onClick={() => setActiveNotifyTab('order')}
-              className={`flex-1 py-3 text-xs font-black rounded-xl uppercase transition-all cursor-pointer ${activeNotifyTab === 'order' ? 'bg-white text-amber-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
-            >
-              📦 Đơn hàng & Khách hàng
+            <button onClick={() => setActiveNotifyTab('order')} className={`flex-1 py-3 text-xs font-black rounded-xl uppercase transition-all cursor-pointer ${activeNotifyTab === 'order' ? 'bg-white text-amber-600 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}>
+              📦 Đơn hàng & Khách
             </button>
           </div>
 
           <div className="space-y-4">
             {loadingNotify ? (
-              <div className="text-center py-16 text-gray-400 font-bold animate-pulse text-xs">Đang đồng bộ dữ liệu thông báo mới nhất...</div>
+              <div className="text-center py-16 text-gray-400 font-bold animate-pulse text-xs">Đang đồng bộ dữ liệu thông báo...</div>
             ) : filteredNotifications.length === 0 ? (
               <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-gray-200 text-gray-400 text-xs">
-                Không có dữ liệu thông báo nào trong danh mục này.
+                Không có dữ liệu thông báo nào.
               </div>
             ) : (
               filteredNotifications.map(notify => {
@@ -562,31 +569,49 @@ function App() {
         </main>
       )}
 
-      {/* MODAL ĐĂNG KÝ / ĐĂNG NHẬP */}
-      {isAuthOpen && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl relative text-gray-800">
-            <button onClick={() => setIsAuthOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 font-bold text-sm cursor-pointer">✕</button>
-            <div className="flex gap-4 border-b border-gray-100 pb-3 mb-5">
-              <button onClick={() => setAuthMode('login')} className={`text-sm font-black pb-1 uppercase tracking-wider cursor-pointer ${authMode === 'login' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-400'}`}>Đăng nhập</button>
-              <button onClick={() => setAuthMode('register')} className={`text-sm font-black pb-1 uppercase tracking-wider cursor-pointer ${authMode === 'register' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-400'}`}>Đăng ký</button>
-            </div>
-            <form onSubmit={(e) => { e.preventDefault(); alert('Tính năng xác thực dữ liệu sẽ được xử lý tiếp ở Backend!'); setIsAuthOpen(false); }} className="space-y-4">
-              <div>
-                <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Tài khoản / Email</label>
-                <input type="text" required placeholder="Nhập tên tài khoản..." className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Mật khẩu</label>
-                <input type="password" required placeholder="••••••••" className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-              <button type="submit" className="w-full bg-white text-black border-2 border-gray-900 hover:bg-black hover:text-white py-2.5 rounded-xl font-bold text-xs transition-all uppercase tracking-wide pt-3 cursor-pointer">
-                {authMode === 'login' ? 'Đăng Nhập Ngay' : 'Tạo Tài Khoản Mới'}
-              </button>
-            </form>
-          </div>
+      {/* MODAL ĐĂNG KÝ / ĐĂNG NHẬP (ĐÃ CẬP NHẬT THÊM TRƯỜNG NHẬP) */}
+{isAuthOpen && (
+  <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+    <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl relative text-gray-800">
+      <button onClick={() => setIsAuthOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 font-bold text-sm cursor-pointer">✕</button>
+      
+      <div className="flex gap-4 border-b border-gray-100 pb-3 mb-5">
+        <button onClick={() => setAuthMode('login')} className={`text-sm font-black pb-1 uppercase tracking-wider cursor-pointer ${authMode === 'login' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-400'}`}>Đăng nhập</button>
+        <button onClick={() => setAuthMode('register')} className={`text-sm font-black pb-1 uppercase tracking-wider cursor-pointer ${authMode === 'register' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-400'}`}>Đăng ký</button>
+      </div>
+      
+      <form onSubmit={handleAuthSubmit} className="space-y-4">
+        <div>
+          <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Tài khoản / Email</label>
+          <input type="text" required placeholder="Nhập email của bạn..." className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </div>
-      )}
+        
+        <div>
+          <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Mật khẩu</label>
+          <input type="password" required placeholder="••••••••" className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </div>
+
+        {/* CÁC TRƯỜNG CHỈ HIỆN KHI Ở CHẾ ĐỘ ĐĂNG KÝ */}
+        {authMode === 'register' && (
+          <>
+            <div>
+              <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Số điện thoại</label>
+              <input type="tel" required placeholder="Nhập số điện thoại..." className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Địa chỉ giao hàng</label>
+              <input type="text" required placeholder="Nhập địa chỉ nhận hàng..." className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+          </>
+        )}
+
+        <button type="submit" className="w-full bg-white text-black border-2 border-gray-900 hover:bg-black hover:text-white py-2.5 rounded-xl font-bold text-xs transition-all uppercase tracking-wide pt-3 cursor-pointer">
+          {authMode === 'login' ? 'Đăng Nhập Ngay' : 'Hoàn Tất Đăng Ký'}
+        </button>
+      </form>
+    </div>
+  </div>
+)}
 
       {/* GIỎ HÀNG SIDEBAR */}
       {isCartOpen && (
@@ -635,6 +660,53 @@ function App() {
           </div>
         </div>
       )}
+
+      {/* MODAL THÔNG BÁO TỰ CHẾ ĐỘC QUYỀN MINISHOP THAY THẾ CHO ALERT MẶC ĐỊNH */}
+      {customAlert.isOpen && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-gray-100 flex flex-col items-center text-center text-gray-900 animate-scaleUp">
+            
+            <div className="mb-4">
+              {customAlert.type === 'success' && (
+                <div className="w-12 h-12 bg-green-50 text-green-500 border border-green-200 rounded-full flex items-center justify-center text-2xl shadow-sm">✓</div>
+              )}
+              {customAlert.type === 'error' && (
+                <div className="w-12 h-12 bg-red-50 text-red-500 border border-red-200 rounded-full flex items-center justify-center text-2xl font-black shadow-sm">✕</div>
+              )}
+              {customAlert.type === 'warning' && (
+                <div className="w-12 h-12 bg-amber-50 text-amber-500 border border-amber-200 rounded-full flex items-center justify-center text-xl shadow-sm">⚠️</div>
+              )}
+              {customAlert.type === 'info' && (
+                <div className="w-12 h-12 bg-blue-50 text-blue-500 border border-blue-200 rounded-full flex items-center justify-center text-xl shadow-sm">ℹ️</div>
+              )}
+            </div>
+
+            <h4 className="text-sm font-black uppercase tracking-wider mb-2 text-gray-800">
+              {customAlert.type === 'success' && 'Thành công'}
+              {customAlert.type === 'error' && 'Thông báo lỗi hệ thống'}
+              {customAlert.type === 'warning' && 'Nhắc nhở hệ thống'}
+              {customAlert.type === 'info' && 'Thông báo hệ thống'}
+            </h4>
+
+            <p className="text-xs text-gray-600 font-medium whitespace-pre-line leading-relaxed mb-5 px-2">
+              {customAlert.message}
+            </p>
+
+            <button 
+              onClick={() => setCustomAlert({ ...customAlert, isOpen: false })} 
+              className={`px-8 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wide transition-all shadow-sm active:scale-95 cursor-pointer border ${
+                customAlert.type === 'success' ? 'bg-green-600 text-white border-green-700 hover:bg-green-700' :
+                customAlert.type === 'error' ? 'bg-red-600 text-white border-red-700 hover:bg-red-700' :
+                customAlert.type === 'warning' ? 'bg-amber-500 text-white border-amber-600 hover:bg-amber-600' :
+                'bg-blue-600 text-white border-blue-700 hover:bg-blue-700'
+              }`}
+            >
+              Xác nhận & Đóng
+            </button>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
