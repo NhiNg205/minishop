@@ -1,7 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-
-// URL của Backend API (Cổng 5000)
-const API_BASE_URL = 'http://localhost:5000/api'; 
+import api from './api';
 
 function App() {
   // Trạng thái điều hướng trang: 'home' hoặc 'notifications'
@@ -76,11 +74,11 @@ function App() {
     const fetchProductsFromBackend = async () => {
       try {
         setLoading(true);
-        const response = await fetch(`${API_BASE_URL}/products`);
-        const result = await response.json();
-        if (result.status === "success") {
-          setProducts(result.data); 
-        }
+        // Thay thế fetch bằng api.get của Axios
+        const response = await api.get('/products');
+        if (response.data.status === "success") {
+          setProducts(response.data.data); 
+      }
         setLoading(false);
       } catch (error) {
         console.error("Lỗi khi kết nối với backend:", error);
@@ -92,13 +90,13 @@ function App() {
 
   // TỰ ĐỘNG CẬP NHẬT THÔNG BÁO TỪ DATABASE LÊN WEBSITE
   useEffect(() => {
-    const fetchNotificationsFromBackend = async () => {
+  const fetchNotificationsFromBackend = async () => {
       try {
         setLoadingNotify(true);
-        const response = await fetch(`${API_BASE_URL}/notifications`); 
-        const result = await response.json();
-        if (result.status === "success") {
-          setNotifications(result.data); 
+          // Thay thế fetch bằng api.get của Axios
+          const response = await api.get('/notifications'); 
+          if (response.data.status === "success") {
+            setNotifications(response.data.data); 
         } else {
           setNotifications([]);
         }
@@ -109,7 +107,7 @@ function App() {
       }
     };
     fetchNotificationsFromBackend();
-  }, []);
+    }, []); 
 
   const addToCart = (product) => {
     const existingItem = cart.find(item => item.id === product.id);
@@ -151,35 +149,32 @@ function App() {
     };
 
     try {
-      const response = await fetch(`${API_BASE_URL}/orders`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(orderData),
+      // Thay thế fetch bằng api.post của Axios
+      const response = await api.post('/orders', orderData);
+
+    if (response.data.status === "success") {
+      setCustomAlert({ 
+        isOpen: true, 
+        type: 'success', 
+        message: `🎉 Đặt hàng thành công!\nMã đơn hàng bảo mật của bạn là: ${response.data.order.order_code}`
       });
-
-      const result = await response.json();
-
-      if (response.ok && result.status === "success") {
-        setCustomAlert({ 
-          isOpen: true, 
-          type: 'success', 
-          message: `🎉 Đặt hàng thành công!\nMã đơn hàng bảo mật của bạn là: ${result.order.order_code}`
-        });
-        setCart([]);
-        setCustomerName('');
-        setIsCartOpen(false);
-      } else {
-        setCustomAlert({ 
-          isOpen: true, 
-          type: 'error', 
-          message: result.message || 'Lỗi hệ thống: Không thể xử lý đơn hàng.' 
-        });
-      }
-    } catch (error) {
-      console.error("Lỗi kết nối đặt hàng:", error);
-      setCustomAlert({ isOpen: true, type: 'error', message: 'Không thể kết nối tới máy chủ Backend!' });
+      setCart([]);
+      setCustomerName('');
+      setIsCartOpen(false);
+    } else {
+      setCustomAlert({ 
+        isOpen: true, 
+        type: 'error', 
+        message: response.data.message || 'Lỗi hệ thống: Không thể xử lý đơn hàng.' 
+      });
     }
-  };
+  } catch (error) {
+    console.error("Lỗi kết nối đặt hàng:", error);
+    // Axios bắt lỗi 400/500 trực tiếp trong catch, đọc thông điệp lỗi từ backend trả về
+    const errorMsg = error.response?.data?.message || 'Không thể kết nối tới máy chủ Backend!';
+    setCustomAlert({ isOpen: true, type: 'error', message: errorMsg });
+  }
+};
 
   // Hàm xử lý khi nhấn nút Đăng nhập / Đăng ký
   const handleAuthSubmit = (e) => {
