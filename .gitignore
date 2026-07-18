@@ -22,3 +22,18 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+# Mở rộng .gitignore khuyến nghị
+node_modules/
+.env
+.env.local
+.env.*.local
+logs/
+*.log
+dist/
+build/
+.DS_Store
+.vscode/
+.idea/
+*.pem
+*.key
+coverage/

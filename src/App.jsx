@@ -7,7 +7,16 @@ function App() {
 
   const [products, setProducts] = useState([]); 
   const [notifications, setNotifications] = useState([]); 
-  const [cart, setCart] = useState([]); 
+  const [cart, setCart] = useState(() => {
+    // ✨ MỚI: Đọc giỏ hàng đã lưu từ lần trước (nếu có) để không bị mất khi F5 trang
+    try {
+      const savedCart = localStorage.getItem('minishop_cart');
+      return savedCart ? JSON.parse(savedCart) : [];
+    } catch (error) {
+      console.error('Không thể đọc giỏ hàng đã lưu, bắt đầu với giỏ hàng trống:', error);
+      return [];
+    }
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Tất Cả Đồ Dùng'); 
   const [isCartOpen, setIsCartOpen] = useState(false);
@@ -29,6 +38,33 @@ function App() {
   // Tab hiện tại trong trang thông báo chính thức ('all', 'sale', 'new', 'order')
   const [activeNotifyTab, setActiveNotifyTab] = useState('all');
 
+  // ✨ MỚI: Trạng thái đăng nhập thật - lưu cả token (để gọi API) và thông tin user (để hiển thị)
+  // Khôi phục từ localStorage khi tải lại trang để không bị đăng xuất mỗi khi F5
+  const [authToken, setAuthToken] = useState(() => localStorage.getItem('minishop_token') || null);
+  const [authUser, setAuthUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem('minishop_user');
+      return saved ? JSON.parse(saved) : null;
+    } catch (error) {
+      return null;
+    }
+  });
+  // Các trường nhập trong form Đăng nhập/Đăng ký (controlled inputs - trước đây form không lưu gì cả)
+  const [authName, setAuthName] = useState('');
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authSubmitting, setAuthSubmitting] = useState(false);
+
+  // ✨ MỚI: Sản phẩm đang xem ở trang chi tiết sản phẩm
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [detailQuantity, setDetailQuantity] = useState(1);
+
+  // ✨ MỚI: Trạng thái cho chức năng tra cứu đơn hàng theo mã
+  const [orderLookupCode, setOrderLookupCode] = useState('');
+  const [orderLookupResult, setOrderLookupResult] = useState(null);
+  const [orderLookupError, setOrderLookupError] = useState('');
+  const [orderLookupLoading, setOrderLookupLoading] = useState(false);
+
   const dropdownRef = useRef(null);
   const notifyDropdownRef = useRef(null);
 
@@ -36,6 +72,45 @@ function App() {
   useEffect(() => {
     document.title = "MiniShop";
   }, []);
+
+  // ✨ MỚI: Tự động lưu giỏ hàng vào localStorage mỗi khi có thay đổi (thêm/xóa/sửa số lượng)
+  useEffect(() => {
+    try {
+      localStorage.setItem('minishop_cart', JSON.stringify(cart));
+    } catch (error) {
+      console.error('Không thể lưu giỏ hàng vào localStorage:', error);
+    }
+  }, [cart]);
+
+  // ✨ MỚI: Đồng bộ token đăng nhập vào localStorage mỗi khi thay đổi (đăng nhập/đăng xuất)
+  useEffect(() => {
+    if (authToken) {
+      localStorage.setItem('minishop_token', authToken);
+    } else {
+      localStorage.removeItem('minishop_token');
+    }
+  }, [authToken]);
+
+  // ✨ MỚI: Đồng bộ thông tin user vào localStorage mỗi khi thay đổi
+  useEffect(() => {
+    if (authUser) {
+      localStorage.setItem('minishop_user', JSON.stringify(authUser));
+    } else {
+      localStorage.removeItem('minishop_user');
+    }
+  }, [authUser]);
+
+  // ✨ MỚI: Định dạng thời gian thông báo cho thân thiện, dùng chung cho cả popup nhanh và trang đầy đủ
+  const formatNotifyTime = (dateStr) => {
+    if (!dateStr) return 'Vừa xong';
+    try {
+      return new Date(dateStr).toLocaleString('vi-VN', {
+        hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit'
+      });
+    } catch (error) {
+      return 'Vừa xong';
+    }
+  };
 
   const categories = [
     { name: 'Tất Cả Đồ Dùng' },
@@ -75,10 +150,28 @@ function App() {
       try {
         setLoading(true);
         // Thay thế fetch bằng api.get của Axios
-        const response = await api.get('/products');
-        if (response.data.status === "success") {
-          setProducts(response.data.data); 
-      }
+        const firstPage = await api.get('/products', { params: { page: 1, limit: 100 } });
+        if (firstPage.data.status === "success") {
+          let allProducts = firstPage.data.data;
+          const { totalPages } = firstPage.data;
+
+          // ✨ MỚI: Nếu backend báo còn nhiều hơn 1 trang (tương lai có trên 100 sản phẩm),
+          // tự động tải nốt các trang còn lại để danh sách sản phẩm luôn đầy đủ, không bị cắt bớt.
+          if (totalPages > 1) {
+            const remainingPageRequests = [];
+            for (let p = 2; p <= totalPages; p++) {
+              remainingPageRequests.push(api.get('/products', { params: { page: p, limit: 100 } }));
+            }
+            const remainingResponses = await Promise.all(remainingPageRequests);
+            remainingResponses.forEach(res => {
+              if (res.data.status === "success") {
+                allProducts = allProducts.concat(res.data.data);
+              }
+            });
+          }
+
+          setProducts(allProducts);
+        }
         setLoading(false);
       } catch (error) {
         console.error("Lỗi khi kết nối với backend:", error);
@@ -123,13 +216,10 @@ function App() {
   };
 
   const updateQuantity = (productId, delta) => {
-    setCart(cart.map(item => {
-      if (item.id === productId) {
-        const newQty = item.quantity + delta;
-        return newQty > 0 ? { ...item, quantity: newQty } : item;
-      }
-      return item;
-    }));
+    setCart(prevCart => prevCart
+      .map(item => item.id === productId ? { ...item, quantity: item.quantity + delta } : item)
+      .filter(item => item.quantity > 0) // ✨ SỬA: Tự động xóa khỏi giỏ nếu số lượng giảm về 0, thay vì kẹt cứng ở mức 1
+    );
   };
 
   const handleCheckout = async () => {
@@ -176,25 +266,108 @@ function App() {
   }
 };
 
-  // Hàm xử lý khi nhấn nút Đăng nhập / Đăng ký
-  const handleAuthSubmit = (e) => {
+  // ✨ SỬA: Hàm xử lý khi nhấn nút Đăng nhập / Đăng ký - GIỜ GỌI API THẬT thay vì chỉ hiện thông báo giả
+  const handleAuthSubmit = async (e) => {
     e.preventDefault();
-    setIsAuthOpen(false); // Đóng khung form lại
-    
-    // Đã sửa: Hiện modal custom thay thế hoàn toàn cho popup đen trình duyệt
-    setCustomAlert({ 
-      isOpen: true, 
-      type: 'info', 
-      message: 'Tính năng xác thực tài khoản và dữ liệu thành viên sẽ được xử lý tiếp ở hệ thống Backend!' 
-    });
+    setAuthSubmitting(true);
+    try {
+      if (authMode === 'login') {
+        const response = await api.post('/auth/login', { email: authEmail, password: authPassword });
+        if (response.data.status === 'success') {
+          setAuthToken(response.data.token);
+          setAuthUser(response.data.user);
+          setIsAuthOpen(false);
+          setAuthName(''); setAuthEmail(''); setAuthPassword('');
+          setCustomAlert({ isOpen: true, type: 'success', message: `Chào mừng trở lại, ${response.data.user.name}!` });
+        }
+      } else {
+        const response = await api.post('/auth/register', { name: authName, email: authEmail, password: authPassword });
+        if (response.data.status === 'success') {
+          setAuthToken(response.data.token);
+          setAuthUser(response.data.user);
+          setIsAuthOpen(false);
+          setAuthName(''); setAuthEmail(''); setAuthPassword('');
+          setCustomAlert({ isOpen: true, type: 'success', message: `Đăng ký thành công! Chào mừng ${response.data.user.name} đến với MiniShop.` });
+        }
+      }
+    } catch (error) {
+      const errorMsg = error.response?.data?.message || 'Không thể kết nối tới máy chủ. Vui lòng thử lại sau.';
+      setCustomAlert({ isOpen: true, type: 'error', message: errorMsg });
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  // ✨ MỚI: Đăng xuất - xóa token và thông tin user khỏi state (kéo theo xóa khỏi localStorage nhờ useEffect ở trên)
+  const handleLogout = () => {
+    setAuthToken(null);
+    setAuthUser(null);
+    setCustomAlert({ isOpen: true, type: 'info', message: 'Bạn đã đăng xuất khỏi tài khoản.' });
+  };
+
+  // ✨ MỚI: Mở trang chi tiết cho 1 sản phẩm cụ thể
+  const openProductDetail = (product) => {
+    setSelectedProduct(product);
+    setDetailQuantity(1);
+    setActivePage('product-detail');
+    window.scrollTo(0, 0);
+  };
+
+  // ✨ MỚI: Thêm vào giỏ hàng từ trang chi tiết sản phẩm (có thể chọn số lượng trước khi thêm)
+  const addSelectedProductToCart = () => {
+    if (!selectedProduct) return;
+    const existingItem = cart.find(item => item.id === selectedProduct.id);
+    if (existingItem) {
+      setCart(cart.map(item => item.id === selectedProduct.id ? { ...item, quantity: item.quantity + detailQuantity } : item));
+    } else {
+      setCart([...cart, { ...selectedProduct, quantity: detailQuantity }]);
+    }
+    setCustomAlert({ isOpen: true, type: 'success', message: `Đã thêm ${detailQuantity} "${selectedProduct.name}" vào giỏ hàng!` });
+  };
+
+  // ✨ MỚI: Nhãn hiển thị + màu sắc tiếng Việt cho từng trạng thái đơn hàng
+  const ORDER_STATUS_LABELS = {
+    pending: { label: 'Chờ xác nhận', color: 'bg-amber-50 text-amber-700 border-amber-200' },
+    confirmed: { label: 'Đã xác nhận', color: 'bg-blue-50 text-blue-700 border-blue-200' },
+    shipping: { label: 'Đang giao hàng', color: 'bg-purple-50 text-purple-700 border-purple-200' },
+    delivered: { label: 'Đã giao thành công', color: 'bg-green-50 text-green-700 border-green-200' },
+    cancelled: { label: 'Đã hủy', color: 'bg-red-50 text-red-700 border-red-200' }
+  };
+
+  // ✨ MỚI: Tra cứu 1 đơn hàng theo mã đơn (order_code) khách hàng nhận được sau khi đặt hàng
+  const handleOrderLookup = async (e) => {
+    e.preventDefault();
+    if (!orderLookupCode.trim()) return;
+    setOrderLookupLoading(true);
+    setOrderLookupError('');
+    setOrderLookupResult(null);
+    try {
+      const response = await api.get(`/orders/${orderLookupCode.trim()}`);
+      if (response.data.status === 'success') {
+        setOrderLookupResult(response.data.data);
+      }
+    } catch (error) {
+      setOrderLookupError(error.response?.data?.message || 'Không thể tra cứu đơn hàng lúc này. Vui lòng thử lại.');
+    } finally {
+      setOrderLookupLoading(false);
+    }
   };
 
   const totalCartPrice = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
 
+  // ✨ MỚI: Số ngày để một sản phẩm còn được xem là "mới" kể từ lúc tạo (created_at)
+  const NEW_PRODUCT_WINDOW_DAYS = 14;
+
   const filteredProducts = products.filter(product => {
     const matchesSearch = product.name.toLowerCase().includes(searchQuery.toLowerCase());
     if (selectedCategory === 'Tất Cả Đồ Dùng') return matchesSearch;
-    if (selectedCategory === 'SẢN PHẨM MỚI') return matchesSearch; 
+    if (selectedCategory === 'SẢN PHẨM MỚI') {
+      // ✨ SỬA: Lọc thật theo created_at thay vì hiển thị toàn bộ sản phẩm như trước
+      if (!product.created_at) return false;
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - NEW_PRODUCT_WINDOW_DAYS);
+      return matchesSearch && new Date(product.created_at) >= cutoffDate;
+    }
     if (selectedCategory === 'SALE CỰC LỚN') {
       return matchesSearch && product.discount_rate > 0;
     }
@@ -276,7 +449,7 @@ function App() {
                             }`}>
                               {notify.type === 'sale' ? 'Giảm giá' : notify.type === 'new' ? 'Hàng mới' : 'Hệ thống'}
                             </span>
-                            <span className="text-[9px] text-gray-400">{notify.time || 'Vừa xong'}</span>
+                            <span className="text-[9px] text-gray-400">{formatNotifyTime(notify.time || notify.created_at)}</span>
                           </div>
                           <h4 className="text-xs font-black text-gray-900 truncate">{notify.title}</h4>
                           <p className="text-[11px] text-gray-500 line-clamp-1 font-medium">{notify.desc}</p>
@@ -356,19 +529,34 @@ function App() {
             <button onClick={() => setActivePage('notifications')} className={`hover:text-blue-600 transition-colors uppercase ${activePage === 'notifications' ? 'text-blue-600 underline underline-offset-4' : ''}`}>
               Thông báo
             </button>
+            {/* ✨ MỚI: Link tra cứu đơn hàng theo mã */}
+            <button onClick={() => setActivePage('order-tracking')} className={`hover:text-blue-600 transition-colors uppercase ${activePage === 'order-tracking' ? 'text-blue-600 underline underline-offset-4' : ''}`}>
+              Tra Cứu Đơn Hàng
+            </button>
             <button className="hover:text-blue-600 transition-colors uppercase mr-4">Liên Hệ</button>
             
+            {/* ✨ SỬA: Hiển thị trạng thái đăng nhập THẬT thay vì luôn hiện nút Đăng nhập/Đăng ký */}
             <div className="flex items-center text-xs font-bold gap-2 border-l border-gray-300 pl-6 text-gray-800">
-              <button onClick={() => { setAuthMode('login'); setIsAuthOpen(true); }} className="hover:text-blue-600 transition-colors uppercase">Đăng nhập</button>
-              <span className="text-gray-300">/</span>
-              <button onClick={() => { setAuthMode('register'); setIsAuthOpen(true); }} className="hover:text-blue-600 transition-colors uppercase">Đăng ký</button>
+              {authUser ? (
+                <>
+                  <span className="text-gray-600 normal-case">Xin chào, <span className="font-black text-blue-600">{authUser.name}</span></span>
+                  <span className="text-gray-300">/</span>
+                  <button onClick={handleLogout} className="hover:text-red-500 transition-colors uppercase cursor-pointer">Đăng xuất</button>
+                </>
+              ) : (
+                <>
+                  <button onClick={() => { setAuthMode('login'); setIsAuthOpen(true); }} className="hover:text-blue-600 transition-colors uppercase cursor-pointer">Đăng nhập</button>
+                  <span className="text-gray-300">/</span>
+                  <button onClick={() => { setAuthMode('register'); setIsAuthOpen(true); }} className="hover:text-blue-600 transition-colors uppercase cursor-pointer">Đăng ký</button>
+                </>
+              )}
             </div>
           </div>
         </div>
       </nav>
 
       {/* NỘI DUNG CHÍNH */}
-      {activePage === 'home' ? (
+      {activePage === 'home' && (
         <main className="max-w-7xl mx-auto px-8 py-6">
           {/* BANNER */}
           <div className="w-full border border-blue-100 rounded-3xl p-10 flex justify-between items-center relative overflow-hidden min-h-[300px] mb-6 shadow-sm bg-blue-50/70 text-gray-900">
@@ -422,7 +610,7 @@ function App() {
                 {filteredProducts.map(product => {
                   const hasDiscount = product.discount_rate && product.discount_rate > 0;
                   return (
-                    <div key={product.id} className="border border-gray-100 rounded-2xl p-4 bg-white shadow-sm hover:shadow-md transition-all flex flex-col justify-between relative group">
+                    <div key={product.id} onClick={() => openProductDetail(product)} className="border border-gray-100 rounded-2xl p-4 bg-white shadow-sm hover:shadow-md transition-all flex flex-col justify-between relative group cursor-pointer">
                       <div>
                         <div className="absolute top-4 left-4 flex flex-col gap-1 z-10 items-start">
                           {product.category && (
@@ -461,7 +649,7 @@ function App() {
                             <span className="text-gray-900 font-black text-sm block leading-none">{product.price.toLocaleString('vi-VN')} đ</span>
                           )}
                         </div>
-                        <button onClick={() => addToCart(product)} disabled={product.stock_quantity <= 0} className={`w-full mt-3 border text-[10px] font-black py-2.5 rounded-xl transition-all transform active:scale-95 uppercase tracking-wider ${product.stock_quantity <= 0 ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed' : 'bg-white text-black border-gray-900 hover:bg-black hover:text-white shadow-sm'}`}>
+                        <button onClick={(e) => { e.stopPropagation(); addToCart(product); }} disabled={product.stock_quantity <= 0} className={`w-full mt-3 border text-[10px] font-black py-2.5 rounded-xl transition-all transform active:scale-95 uppercase tracking-wider ${product.stock_quantity <= 0 ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed' : 'bg-white text-black border-gray-900 hover:bg-black hover:text-white shadow-sm'}`}>
                           Thêm Vào Giỏ Hàng
                         </button>
                       </div>
@@ -472,8 +660,153 @@ function App() {
             )}
           </section>
         </main>
-      ) : (
-        /* TRANG THÔNG BÁO CHÍNH THỨC */
+      )}
+
+      {/* ✨ MỚI: TRANG CHI TIẾT SẢN PHẨM */}
+      {activePage === 'product-detail' && selectedProduct && (
+        <main className="max-w-5xl mx-auto px-8 py-8 animate-fadeIn">
+          <button onClick={() => setActivePage('home')} className="text-xs font-bold bg-white text-gray-700 border border-gray-200 px-4 py-2 rounded-xl shadow-sm hover:border-gray-900 transition-all flex items-center gap-1 cursor-pointer mb-6">
+            <span>←</span> Quay lại danh sách sản phẩm
+          </button>
+
+          <div className="grid grid-cols-2 gap-10 bg-white rounded-3xl border border-gray-100 p-8 shadow-sm">
+            <div className="aspect-square rounded-2xl overflow-hidden bg-gray-50 relative">
+              <img src={selectedProduct.img || 'https://images.unsplash.com/photo-1513694203232-719a280e022f?w=400'} alt={selectedProduct.name} className="w-full h-full object-cover" />
+              {selectedProduct.stock_quantity <= 0 && (
+                <span className="absolute inset-0 bg-black/40 text-white font-bold flex items-center justify-center text-sm">HẾT HÀNG</span>
+              )}
+            </div>
+
+            <div className="flex flex-col">
+              <div className="flex flex-col gap-1 mb-3 items-start">
+                {selectedProduct.category && (
+                  <span className="bg-gray-900 text-white text-[9px] font-black px-2 py-0.5 rounded shadow-sm uppercase tracking-wider">{selectedProduct.category}</span>
+                )}
+                {selectedProduct.discount_rate > 0 && (
+                  <span className="bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded shadow-sm">Giảm {selectedProduct.discount_rate}%</span>
+                )}
+              </div>
+
+              <h2 className="text-2xl font-black text-gray-900 leading-snug mb-3">{selectedProduct.name}</h2>
+
+              <div className="mb-4">
+                {selectedProduct.discount_rate > 0 ? (
+                  <>
+                    <span className="text-gray-400 line-through text-sm font-medium block mb-1">{(selectedProduct.original_price || selectedProduct.price).toLocaleString('vi-VN')} đ</span>
+                    <span className="text-red-500 font-black text-3xl block">{selectedProduct.price.toLocaleString('vi-VN')} đ</span>
+                  </>
+                ) : (
+                  <span className="text-gray-900 font-black text-3xl block">{selectedProduct.price.toLocaleString('vi-VN')} đ</span>
+                )}
+              </div>
+
+              <p className="text-sm text-gray-600 leading-relaxed mb-6 flex-1">
+                {selectedProduct.description || 'Sản phẩm chưa có mô tả chi tiết.'}
+              </p>
+
+              <div className="text-xs text-gray-500 font-bold mb-5">
+                Tình trạng kho:{' '}
+                {selectedProduct.stock_quantity > 0 ? (
+                  <span className="text-green-600">Còn {selectedProduct.stock_quantity} sản phẩm</span>
+                ) : (
+                  <span className="text-red-500">Hết hàng</span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-4 mb-5">
+                <span className="text-xs font-bold text-gray-500 uppercase">Số lượng</span>
+                <div className="flex items-center gap-3 border border-gray-200 rounded-xl px-3 py-1.5">
+                  <button onClick={() => setDetailQuantity(q => Math.max(1, q - 1))} className="w-6 h-6 flex items-center justify-center font-bold text-gray-600 hover:text-gray-900 cursor-pointer">-</button>
+                  <span className="text-sm font-black w-6 text-center">{detailQuantity}</span>
+                  <button onClick={() => setDetailQuantity(q => Math.min(selectedProduct.stock_quantity || 99, q + 1))} className="w-6 h-6 flex items-center justify-center font-bold text-gray-600 hover:text-gray-900 cursor-pointer">+</button>
+                </div>
+              </div>
+
+              <button onClick={addSelectedProductToCart} disabled={selectedProduct.stock_quantity <= 0} className={`w-full border-2 text-xs font-black py-3.5 rounded-xl transition-all transform active:scale-95 uppercase tracking-wider ${selectedProduct.stock_quantity <= 0 ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed' : 'bg-white text-black border-gray-900 hover:bg-black hover:text-white shadow-sm'}`}>
+                Thêm Vào Giỏ Hàng
+              </button>
+            </div>
+          </div>
+        </main>
+      )}
+
+      {/* ✨ MỚI: TRANG TRA CỨU ĐƠN HÀNG */}
+      {activePage === 'order-tracking' && (
+        <main className="max-w-2xl mx-auto px-6 py-10 animate-fadeIn">
+          <div className="flex justify-between items-center mb-8">
+            <div>
+              <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Theo dõi đơn hàng</div>
+              <h2 className="text-2xl font-black text-gray-950 tracking-tight uppercase flex items-center gap-2">
+                <span>📦</span> TRA CỨU ĐƠN HÀNG
+              </h2>
+            </div>
+            <button onClick={() => setActivePage('home')} className="text-xs font-bold bg-white text-gray-700 border border-gray-200 px-4 py-2 rounded-xl shadow-sm hover:border-gray-900 transition-all flex items-center gap-1 cursor-pointer">
+              <span>←</span> Quay lại trang chủ
+            </button>
+          </div>
+
+          <form onSubmit={handleOrderLookup} className="flex gap-3 mb-8">
+            <input
+              type="text"
+              value={orderLookupCode}
+              onChange={(e) => setOrderLookupCode(e.target.value)}
+              placeholder="Nhập mã đơn hàng (VD: TN-20260718-X97B)..."
+              className="flex-1 px-4 py-3 bg-white border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <button type="submit" disabled={orderLookupLoading} className="bg-black text-white font-black text-xs px-6 py-3 rounded-xl hover:bg-blue-600 transition-all shadow-md active:scale-95 uppercase tracking-wide disabled:opacity-50 cursor-pointer">
+              {orderLookupLoading ? 'Đang tra cứu...' : 'Tra cứu'}
+            </button>
+          </form>
+
+          {orderLookupError && (
+            <div className="bg-red-50 border border-red-200 text-red-600 text-xs font-bold p-4 rounded-xl mb-6">
+              {orderLookupError}
+            </div>
+          )}
+
+          {orderLookupResult && (
+            <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm space-y-4">
+              <div className="flex justify-between items-center border-b border-gray-100 pb-4">
+                <div>
+                  <div className="text-[10px] text-gray-400 font-bold uppercase">Mã đơn hàng</div>
+                  <div className="text-sm font-black text-gray-900">{orderLookupResult.order_code}</div>
+                </div>
+                <span className={`text-[10px] font-black uppercase px-3 py-1.5 rounded-full border ${(ORDER_STATUS_LABELS[orderLookupResult.status] || ORDER_STATUS_LABELS.pending).color}`}>
+                  {(ORDER_STATUS_LABELS[orderLookupResult.status] || ORDER_STATUS_LABELS.pending).label}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-4 text-xs">
+                <div>
+                  <div className="text-gray-400 font-bold uppercase text-[10px] mb-1">Khách hàng</div>
+                  <div className="font-bold text-gray-800">{orderLookupResult.customer_name}</div>
+                </div>
+                <div>
+                  <div className="text-gray-400 font-bold uppercase text-[10px] mb-1">Tổng tiền</div>
+                  <div className="font-black text-red-500">{orderLookupResult.total_price.toLocaleString('vi-VN')} đ</div>
+                </div>
+                <div className="col-span-2">
+                  <div className="text-gray-400 font-bold uppercase text-[10px] mb-1">Thời gian đặt</div>
+                  <div className="font-bold text-gray-800">{formatNotifyTime(orderLookupResult.created_at)}</div>
+                </div>
+              </div>
+              <div className="border-t border-gray-100 pt-4">
+                <div className="text-gray-400 font-bold uppercase text-[10px] mb-2">Sản phẩm đã đặt</div>
+                <div className="space-y-2">
+                  {(orderLookupResult.items || []).map((item, idx) => (
+                    <div key={idx} className="flex justify-between text-xs">
+                      <span className="text-gray-700 font-medium">{item.product_name} x{item.quantity}</span>
+                      <span className="text-gray-900 font-bold">{item.subtotal.toLocaleString('vi-VN')} đ</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </main>
+      )}
+
+      {/* TRANG THÔNG BÁO CHÍNH THỨC */}
+      {activePage === 'notifications' && (
         <main className="max-w-4xl mx-auto px-6 py-10 animate-fadeIn">
           <div className="flex justify-between items-center mb-8">
             <div>
@@ -539,7 +872,7 @@ function App() {
                         <span className={`text-[9px] font-black uppercase px-2 py-0.5 border rounded-md ${badgeStyle}`}>
                           {typeLabel}
                         </span>
-                        <span className="text-[10px] text-gray-400 font-medium">{notify.time || notify.created_at}</span>
+                        <span className="text-[10px] text-gray-400 font-medium">{formatNotifyTime(notify.time || notify.created_at)}</span>
                       </div>
                       <h3 className="text-sm font-black text-gray-900 leading-tight">{notify.title}</h3>
                       <p className="text-xs text-gray-600 leading-relaxed font-medium">{notify.desc}</p>
@@ -576,32 +909,30 @@ function App() {
       </div>
       
       <form onSubmit={handleAuthSubmit} className="space-y-4">
+        {/* ✨ MỚI: Trường Họ tên - CHỈ hiện khi đăng ký, vì API backend yêu cầu bắt buộc trường "name" */}
+        {authMode === 'register' && (
+          <div>
+            <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Họ và tên</label>
+            <input type="text" required value={authName} onChange={(e) => setAuthName(e.target.value)} placeholder="Nhập họ và tên của bạn..." className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+        )}
+
         <div>
-          <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Tài khoản / Email</label>
-          <input type="text" required placeholder="Nhập email của bạn..." className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Email</label>
+          {/* ✨ SỬA: Kết nối input với state (trước đây không có value/onChange nên form không lưu được gì) */}
+          <input type="email" required value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} placeholder="Nhập email của bạn..." className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </div>
         
         <div>
           <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Mật khẩu</label>
-          <input type="password" required placeholder="••••••••" className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <input type="password" required minLength={6} value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} placeholder="Tối thiểu 6 ký tự..." className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </div>
 
-        {/* CÁC TRƯỜNG CHỈ HIỆN KHI Ở CHẾ ĐỘ ĐĂNG KÝ */}
-        {authMode === 'register' && (
-          <>
-            <div>
-              <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Số điện thoại</label>
-              <input type="tel" required placeholder="Nhập số điện thoại..." className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-            <div>
-              <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Địa chỉ giao hàng</label>
-              <input type="text" required placeholder="Nhập địa chỉ nhận hàng..." className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-          </>
-        )}
+        {/* ✨ SỬA: Bỏ trường SĐT/địa chỉ vì API backend hiện chỉ lưu name/email/password - giữ 2 trường này
+            sẽ khiến người dùng tưởng nhầm là dữ liệu đó được lưu trong khi thực ra không hề */}
 
-        <button type="submit" className="w-full bg-white text-black border-2 border-gray-900 hover:bg-black hover:text-white py-2.5 rounded-xl font-bold text-xs transition-all uppercase tracking-wide pt-3 cursor-pointer">
-          {authMode === 'login' ? 'Đăng Nhập Ngay' : 'Hoàn Tất Đăng Ký'}
+        <button type="submit" disabled={authSubmitting} className="w-full bg-white text-black border-2 border-gray-900 hover:bg-black hover:text-white py-2.5 rounded-xl font-bold text-xs transition-all uppercase tracking-wide pt-3 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+          {authSubmitting ? 'Đang xử lý...' : (authMode === 'login' ? 'Đăng Nhập Ngay' : 'Hoàn Tất Đăng Ký')}
         </button>
       </form>
     </div>
