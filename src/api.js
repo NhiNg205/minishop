@@ -11,4 +11,16 @@ const api = axios.create({
   },
 });
 
+// ✨ MỚI: Tự động gắn "Authorization: Bearer <token>" vào MỌI request nếu người dùng đã đăng nhập.
+// Các route công khai (vd. GET /products) sẽ đơn giản bỏ qua header này, còn route yêu cầu
+// đăng nhập (vd. GET /orders/my, hoặc các API quản trị) sẽ tự động dùng được ngay - không cần
+// truyền token thủ công ở từng nơi gọi api trong App.jsx.
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('minishop_token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
 export default api;

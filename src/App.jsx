@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import api from './api';
+import LoadingSpinner from './components/LoadingSpinner';
+import ErrorMessage from './components/ErrorMessage';
+import AdminDashboard from './components/AdminDashboard';
 
 function App() {
   // Trạng thái điều hướng trang: 'home' hoặc 'notifications'
@@ -22,6 +25,7 @@ function App() {
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false); 
   const [loading, setLoading] = useState(true);
+  const [productsError, setProductsError] = useState(''); // ✨ MỚI: lưu lỗi khi tải sản phẩm thất bại
   const [loadingNotify, setLoadingNotify] = useState(true); 
   const [customerName, setCustomerName] = useState(''); 
 
@@ -145,39 +149,43 @@ function App() {
   }, []);
 
   // LẤY SẢN PHẨM TỪ BACKEND DATABASE
-  useEffect(() => {
-    const fetchProductsFromBackend = async () => {
-      try {
-        setLoading(true);
-        // Thay thế fetch bằng api.get của Axios
-        const firstPage = await api.get('/products', { params: { page: 1, limit: 100 } });
-        if (firstPage.data.status === "success") {
-          let allProducts = firstPage.data.data;
-          const { totalPages } = firstPage.data;
+  const fetchProductsFromBackend = async () => {
+    try {
+      setLoading(true);
+      setProductsError(''); // ✨ MỚI: xóa lỗi cũ mỗi lần thử lại
+      // Thay thế fetch bằng api.get của Axios
+      const firstPage = await api.get('/products', { params: { page: 1, limit: 100 } });
+      if (firstPage.data.status === "success") {
+        let allProducts = firstPage.data.data;
+        const { totalPages } = firstPage.data;
 
-          // ✨ MỚI: Nếu backend báo còn nhiều hơn 1 trang (tương lai có trên 100 sản phẩm),
-          // tự động tải nốt các trang còn lại để danh sách sản phẩm luôn đầy đủ, không bị cắt bớt.
-          if (totalPages > 1) {
-            const remainingPageRequests = [];
-            for (let p = 2; p <= totalPages; p++) {
-              remainingPageRequests.push(api.get('/products', { params: { page: p, limit: 100 } }));
-            }
-            const remainingResponses = await Promise.all(remainingPageRequests);
-            remainingResponses.forEach(res => {
-              if (res.data.status === "success") {
-                allProducts = allProducts.concat(res.data.data);
-              }
-            });
+        // ✨ MỚI: Nếu backend báo còn nhiều hơn 1 trang (tương lai có trên 100 sản phẩm),
+        // tự động tải nốt các trang còn lại để danh sách sản phẩm luôn đầy đủ, không bị cắt bớt.
+        if (totalPages > 1) {
+          const remainingPageRequests = [];
+          for (let p = 2; p <= totalPages; p++) {
+            remainingPageRequests.push(api.get('/products', { params: { page: p, limit: 100 } }));
           }
-
-          setProducts(allProducts);
+          const remainingResponses = await Promise.all(remainingPageRequests);
+          remainingResponses.forEach(res => {
+            if (res.data.status === "success") {
+              allProducts = allProducts.concat(res.data.data);
+            }
+          });
         }
-        setLoading(false);
-      } catch (error) {
-        console.error("Lỗi khi kết nối với backend:", error);
-        setLoading(false);
+
+        setProducts(allProducts);
       }
-    };
+      setLoading(false);
+    } catch (error) {
+      console.error("Lỗi khi kết nối với backend:", error);
+      // ✨ MỚI: Lưu lại thông báo lỗi để hiển thị ErrorMessage kèm nút "Thử lại"
+      setProductsError(error.response?.data?.message || 'Không thể tải danh sách sản phẩm. Vui lòng kiểm tra kết nối và thử lại.');
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     fetchProductsFromBackend();
   }, []);
 
@@ -352,6 +360,29 @@ function App() {
       setOrderLookupLoading(false);
     }
   };
+
+  // ✨ MỚI: Lịch sử đơn hàng của tài khoản đang đăng nhập (GET /orders/my)
+  const [myOrders, setMyOrders] = useState([]);
+  const [myOrdersLoading, setMyOrdersLoading] = useState(false);
+
+  useEffect(() => {
+    if (activePage === 'my-orders' && authUser) {
+      const fetchMyOrders = async () => {
+        setMyOrdersLoading(true);
+        try {
+          const response = await api.get('/orders/my');
+          if (response.data.status === 'success') {
+            setMyOrders(response.data.data);
+          }
+        } catch (error) {
+          setCustomAlert({ isOpen: true, type: 'error', message: error.response?.data?.message || 'Không tải được lịch sử đơn hàng.' });
+        } finally {
+          setMyOrdersLoading(false);
+        }
+      };
+      fetchMyOrders();
+    }
+  }, [activePage, authUser]);
 
   const totalCartPrice = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
 
@@ -540,6 +571,16 @@ function App() {
               {authUser ? (
                 <>
                   <span className="text-gray-600 normal-case">Xin chào, <span className="font-black text-blue-600">{authUser.name}</span></span>
+                  {/* ✨ MỚI: Đơn hàng của tôi - chỉ hiện khi đã đăng nhập */}
+                  <span className="text-gray-300">/</span>
+                  <button onClick={() => setActivePage('my-orders')} className="hover:text-blue-600 transition-colors uppercase cursor-pointer">Đơn Của Tôi</button>
+                  {/* ✨ MỚI: Link Quản Trị - chỉ hiện với tài khoản role admin */}
+                  {authUser.role === 'admin' && (
+                    <>
+                      <span className="text-gray-300">/</span>
+                      <button onClick={() => setActivePage('admin')} className="hover:text-purple-600 transition-colors uppercase cursor-pointer">Quản Trị</button>
+                    </>
+                  )}
                   <span className="text-gray-300">/</span>
                   <button onClick={handleLogout} className="hover:text-red-500 transition-colors uppercase cursor-pointer">Đăng xuất</button>
                 </>
@@ -600,7 +641,9 @@ function App() {
             </div>
             
             {loading ? (
-              <div className="text-center py-16 text-gray-400 font-bold animate-pulse text-xs">Đang nạp dữ liệu từ máy chủ database...</div>
+              <LoadingSpinner message="Đang tải sản phẩm..." />
+            ) : productsError ? (
+              <ErrorMessage message={productsError} onRetry={fetchProductsFromBackend} />
             ) : filteredProducts.length === 0 ? (
               <div className="text-center py-12 bg-white rounded-2xl border border-dashed border-gray-200 text-gray-400 text-xs">
                 Không có sản phẩm nào trong nhóm danh mục này.
@@ -803,6 +846,46 @@ function App() {
             </div>
           )}
         </main>
+      )}
+
+      {/* ✨ MỚI: TRANG "ĐƠN CỦA TÔI" - lịch sử đơn hàng của tài khoản đang đăng nhập */}
+      {activePage === 'my-orders' && (
+        <main className="max-w-3xl mx-auto px-6 py-10 animate-fadeIn">
+          <h2 className="text-lg font-black text-gray-800 mb-6">Đơn Hàng Của Tôi</h2>
+
+          {!authUser ? (
+            <p className="text-xs text-gray-400">Bạn cần đăng nhập để xem lịch sử đơn hàng.</p>
+          ) : myOrdersLoading ? (
+            <LoadingSpinner />
+          ) : myOrders.length === 0 ? (
+            <p className="text-xs text-gray-400">Bạn chưa có đơn hàng nào. Hãy mua sắm và quay lại đây nhé!</p>
+          ) : (
+            <div className="space-y-3">
+              {myOrders.map((order) => (
+                <div key={order.id} className="border border-gray-100 rounded-2xl p-4 bg-white shadow-sm flex justify-between items-center">
+                  <div>
+                    <div className="text-sm font-black text-gray-900">{order.order_code}</div>
+                    <div className="text-[11px] text-gray-400 mt-1">{formatNotifyTime(order.created_at)}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-sm font-black text-red-500">{Number(order.total_price).toLocaleString('vi-VN')} đ</div>
+                    <span className={`text-[10px] font-black uppercase px-3 py-1 rounded-full border inline-block mt-1 ${(ORDER_STATUS_LABELS[order.status] || ORDER_STATUS_LABELS.pending).color}`}>
+                      {(ORDER_STATUS_LABELS[order.status] || ORDER_STATUS_LABELS.pending).label}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </main>
+      )}
+
+      {/* ✨ MỚI: TRANG QUẢN TRỊ - chỉ render khi đúng là tài khoản role admin (phòng trường hợp cố tình sửa URL/state) */}
+      {activePage === 'admin' && authUser?.role === 'admin' && (
+        <AdminDashboard
+          onBack={() => setActivePage('home')}
+          onNotify={(type, message) => setCustomAlert({ isOpen: true, type, message })}
+        />
       )}
 
       {/* TRANG THÔNG BÁO CHÍNH THỨC */}
